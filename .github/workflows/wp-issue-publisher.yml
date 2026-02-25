@@ -98,42 +98,42 @@ jobs:
               exit 1
             fi
             prompt=$(cat <<'PROMPT'
-You are assisting with an issue-driven workflow for an IT technical blog. Based on the issue TITLE and BODY below, produce an SEO-friendly article in Japanese, suitable for publishing on WordPress via the REST API. Keep it concise and practical. Output must be raw HTML only (no markdown). The content must include exactly these three manual insertion placeholders and you must NOT delete or move them:
-
-<!-- MANUAL_1_START -->
-<!-- MANUAL_1_END -->
-<!-- MANUAL_2_START -->
-<!-- MANUAL_2_END -->
-<!-- MANUAL_3_START -->
-<!-- MANUAL_3_END -->
-
-Use this structure:
-<h2>TL;DR</h2>
-<p>...</p>
-<h2>この記事でわかること</h2>
-<ul><li>...</li></ul>
-<h2>前提条件</h2>
-<p>...</p>
-<h2>手順</h2>
-<h3>手順1</h3>
-<p>...</p>
-<!-- MANUAL_1_START --><!-- MANUAL_1_END -->
-<h3>手順2</h3>
-<p>...</p>
-<!-- MANUAL_2_START --><!-- MANUAL_2_END -->
-<h3>手順3</h3>
-<p>...</p>
-<!-- MANUAL_3_START --><!-- MANUAL_3_END -->
-<h2>よくあるエラー</h2>
-<ul><li>...</li></ul>
-<h2>応用・改善</h2>
-<p>...</p>
-<h2>まとめ</h2>
-<p>...</p>
-
-TITLE:
-PROMPT
-)
+            You are assisting with an issue-driven workflow for an IT technical blog. Based on the issue TITLE and BODY below, produce an SEO-friendly article in Japanese, suitable for publishing on WordPress via the REST API. Keep it concise and practical. Output must be raw HTML only (no markdown). The content must include exactly these three manual insertion placeholders and you must NOT delete or move them:
+            
+            <!-- MANUAL_1_START -->
+            <!-- MANUAL_1_END -->
+            <!-- MANUAL_2_START -->
+            <!-- MANUAL_2_END -->
+            <!-- MANUAL_3_START -->
+            <!-- MANUAL_3_END -->
+            
+            Use this structure:
+            <h2>TL;DR</h2>
+            <p>...</p>
+            <h2>この記事でわかること</h2>
+            <ul><li>...</li></ul>
+            <h2>前提条件</h2>
+            <p>...</p>
+            <h2>手順</h2>
+            <h3>手順1</h3>
+            <p>...</p>
+            <!-- MANUAL_1_START --><!-- MANUAL_1_END -->
+            <h3>手順2</h3>
+            <p>...</p>
+            <!-- MANUAL_2_START --><!-- MANUAL_2_END -->
+            <h3>手順3</h3>
+            <p>...</p>
+            <!-- MANUAL_3_START --><!-- MANUAL_3_END -->
+            <h2>よくあるエラー</h2>
+            <ul><li>...</li></ul>
+            <h2>応用・改善</h2>
+            <p>...</p>
+            <h2>まとめ</h2>
+            <p>...</p>
+            
+            TITLE:
+            PROMPT
+            )
             echo "$prompt" > prompt.txt
             echo "$title" >> prompt.txt
             echo "BODY:" >> prompt.txt
@@ -189,9 +189,9 @@ PROMPT
                 | jq -r '.content.rendered // ""')
             fi
             prompt=$(cat <<'PROMPT'
-You are editing an existing WordPress post in raw HTML. Rewrite the CURRENT HTML content according to the INSTRUCTIONS, but you must preserve and keep the order of these placeholders exactly as-is (including comments): <!-- MANUAL_1_START --><!-- MANUAL_1_END -->, <!-- MANUAL_2_START --><!-- MANUAL_2_END -->, <!-- MANUAL_3_START --><!-- MANUAL_3_END -->. Do not delete or duplicate them. Output only revised HTML content.
-PROMPT
-)
+            You are editing an existing WordPress post in raw HTML. Rewrite the CURRENT HTML content according to the INSTRUCTIONS, but you must preserve and keep the order of these placeholders exactly as-is (including comments): <!-- MANUAL_1_START --><!-- MANUAL_1_END -->, <!-- MANUAL_2_START --><!-- MANUAL_2_END -->, <!-- MANUAL_3_START --><!-- MANUAL_3_END -->. Do not delete or duplicate them. Output only revised HTML content.
+            PROMPT
+            )
             revised=$(curl -s https://api.openai.com/v1/chat/completions \
               -H "Authorization: Bearer $OPENAI_API_KEY" \
               -H "Content-Type: application/json" \
@@ -215,24 +215,24 @@ PROMPT
               exit 1
             fi
             python - <<'PY' > schedule.json
-from datetime import datetime, time, timedelta, timezone
-import json
-JST = timezone(timedelta(hours=9))
-now = datetime.now(JST)
-target_time = time(19, 0)
-def next_occurrence(now):
-    for offset in range(8):
-        d = now.date() + timedelta(days=offset)
-        dt = datetime.combine(d, target_time, JST)
-        if dt <= now:
-            continue
-        # Tuesday=1 Friday=4 (weekday: Monday=0)
-        if dt.weekday() in (1, 4):
-            return dt
-    return now + timedelta(days=1)
-dt = next_occurrence(now)
-print(json.dumps({"date_jst": dt.isoformat(timespec="seconds"), "date_gmt": dt.astimezone(timezone.utc).isoformat(timespec="seconds")}))
-PY
+            from datetime import datetime, time, timedelta, timezone
+            import json
+            JST = timezone(timedelta(hours=9))
+            now = datetime.now(JST)
+            target_time = time(19, 0)
+            def next_occurrence(now):
+                for offset in range(8):
+                    d = now.date() + timedelta(days=offset)
+                    dt = datetime.combine(d, target_time, JST)
+                    if dt <= now:
+                        continue
+                    # Tuesday=1 Friday=4 (weekday: Monday=0)
+                    if dt.weekday() in (1, 4):
+                        return dt
+                return now + timedelta(days=1)
+            dt = next_occurrence(now)
+            print(json.dumps({"date_jst": dt.isoformat(timespec="seconds"), "date_gmt": dt.astimezone(timezone.utc).isoformat(timespec="seconds")}))
+            PY
             date_jst=$(jq -r '.date_jst' schedule.json)
             date_gmt=$(jq -r '.date_gmt' schedule.json)
             curl -s -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
