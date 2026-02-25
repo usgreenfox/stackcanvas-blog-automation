@@ -132,8 +132,8 @@ jobs:
             <p>...</p>
             
             TITLE:
-            PROMPT
-            )
+          PROMPT
+          )
             echo "$prompt" > prompt.txt
             echo "$title" >> prompt.txt
             echo "BODY:" >> prompt.txt
