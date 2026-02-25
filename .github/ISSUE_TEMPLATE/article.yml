@@ -1,0 +1,38 @@
+name: Article idea (IT)
+description: "IT技術記事のアイデアIssue。approvedを付けたら下書き生成が起動する前提の設計。"
+title: "[Idea] "
+labels:
+  - idea
+body:
+  - type: input
+    id: keywords
+    attributes:
+      label: 主キーワード（3〜6）
+      placeholder: "docker compose, rails, staging"
+    validations:
+      required: true
+  - type: textarea
+    id: reader
+    attributes:
+      label: 想定読者
+      placeholder: "Rails中級者"
+  - type: textarea
+    id: goal
+    attributes:
+      label: この記事の目的（読者ができるようになること）
+      placeholder: "既存PJをcompose化してローカルで簡単に起動"
+  - type: textarea
+    id: outline
+    attributes:
+      label: H2アウトライン（3つ以上）
+      placeholder: |
+        ## TL;DR
+        ## 前提条件
+        ## 手順1
+        ## 手順2
+        ## 手順3
+  - type: textarea
+    id: notes
+    attributes:
+      label: 収益導線メモ（任意）
+      placeholder: "Udemy案件、ツール比較表、内部リンク候補"
