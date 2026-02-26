@@ -1,5 +1,4 @@
 name: WordPress issue publisher
-
 permissions:
   issues: write
   contents: read
@@ -23,25 +22,19 @@ jobs:
     steps:
       - name: Determine action/issue
         id: ctx
-        env:
-          INPUT_ACTION: ${{ github.event.inputs.action || '' }}
-          INPUT_NUM: ${{ github.event.inputs.issue_number || '' }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "issues" ]; then
-            ISSUE=${{ github.event.issue.number }}
-            LABEL=${{ github.event.label.name }}
-            case "$LABEL" in
-              approved|needs_changes|publish_ok) ACTION="$LABEL" ;;
-              *) echo "Label $LABEL ignored"; echo "action=ignore" >> $GITHUB_OUTPUT; echo "issue=$ISSUE" >> $GITHUB_OUTPUT; exit 0;;
-            esac
-          else
-            ISSUE="$INPUT_NUM"
-            ACTION="$INPUT_ACTION"
-          fi
-          echo "action=$ACTION" >> $GITHUB_OUTPUT
-          echo "issue=$ISSUE" >> $GITHUB_OUTPUT
-      - name: Process
-        if: steps.ctx.outputs.action != 'ignore'
+          echo "action=${{ github.event_name == 'issues' && (github.event.label.name == 'approved' || github.event.label.name == 'needs_changes' || github.event.label.name == 'publish_ok') && github.event.label.name || github.event.inputs.action }}" >> "$GITHUB_OUTPUT"
+          echo "issue=${{ github.event_name == 'issues' && github.event.issue.number || github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x scripts/wp_issue_publisher.sh
+
+      - name: Run publisher
+        if: steps.ctx.outputs.action != ''
+        run: scripts/wp_issue_publisher.sh
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.ctx.outputs.issue }}
@@ -50,199 +43,3 @@ jobs:
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          set -euo pipefail
-          basic="$(printf '%s:%s' "$WP_USER" "$WP_APP_PASSWORD" | base64)"
-          # fetch issue
-          curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}" > issue.json
-          title=$(jq -r '.title' issue.json)
-          body=$(jq -r '.body // ""' issue.json)
-          wp_post_id=$(printf '%s' "$body" | awk -F: '/^WP_POST_ID/ {gsub(/ /,"",$2); print $2}' | head -n1)
-          get_issue_comments() {
-            curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments?per_page=1&sort=created&direction=desc"
-          }
-          update_issue_body() {
-            local newbody="$1"
-            curl -s -X PATCH -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              -d "$(jq -n --arg body "$newbody" '{body:$body}')" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}" > /dev/null
-          }
-          comment_issue() {
-            local text="$1"
-            curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              -d "$(jq -n --arg body "$text" '{body:$body}')" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" > /dev/null
-          }
-          set_labels() {
-            local add="$1" remove="$2"
-            if [ -n "$add" ]; then
-              curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-                -d "$(jq -n --arg add "$add" '{labels:[$add]}')" \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/labels" > /dev/null
-            fi
-            if [ -n "$remove" ]; then
-              curl -s -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/labels/$remove" > /dev/null || true
-            fi
-          }
-
-          if [ "$ACTION" = "approved" ]; then
-            if [ -n "$wp_post_id" ]; then
-              echo "Already has WP_POST_ID=$wp_post_id; skip create"
-              exit 0
-            fi
-            if [ -z "${OPENAI_API_KEY:-}" ]; then
-              echo "OPENAI_API_KEY not set; cannot generate content"
-              exit 1
-            fi
-            prompt=$(cat <<'PROMPT'
-            You are assisting with an issue-driven workflow for an IT technical blog. Based on the issue TITLE and BODY below, produce an SEO-friendly article in Japanese, suitable for publishing on WordPress via the REST API. Keep it concise and practical. Output must be raw HTML only (no markdown). The content must include exactly these three manual insertion placeholders and you must NOT delete or move them:
-            
-            <!-- MANUAL_1_START -->
-            <!-- MANUAL_1_END -->
-            <!-- MANUAL_2_START -->
-            <!-- MANUAL_2_END -->
-            <!-- MANUAL_3_START -->
-            <!-- MANUAL_3_END -->
-            
-            Use this structure:
-            <h2>TL;DR</h2>
-            <p>...</p>
-            <h2>この記事でわかること</h2>
-            <ul><li>...</li></ul>
-            <h2>前提条件</h2>
-            <p>...</p>
-            <h2>手順</h2>
-            <h3>手順1</h3>
-            <p>...</p>
-            <!-- MANUAL_1_START --><!-- MANUAL_1_END -->
-            <h3>手順2</h3>
-            <p>...</p>
-            <!-- MANUAL_2_START --><!-- MANUAL_2_END -->
-            <h3>手順3</h3>
-            <p>...</p>
-            <!-- MANUAL_3_START --><!-- MANUAL_3_END -->
-            <h2>よくあるエラー</h2>
-            <ul><li>...</li></ul>
-            <h2>応用・改善</h2>
-            <p>...</p>
-            <h2>まとめ</h2>
-            <p>...</p>
-            
-            TITLE:
-          PROMPT
-          )
-            echo "$prompt" > prompt.txt
-            echo "$title" >> prompt.txt
-            echo "BODY:" >> prompt.txt
-            echo "$body" >> prompt.txt
-
-            content=$(curl -s https://api.openai.com/v1/chat/completions \
-              -H "Authorization: Bearer $OPENAI_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n \
-                --arg model "gpt-4o-mini" \
-                --arg sys "You are a helpful assistant." \
-                --arg usr "$(cat prompt.txt)" \
-                '{model:$model,messages:[{role:"system",content:$sys},{role:"user",content:$usr}],temperature:0.3}' \
-              )" | jq -r '.choices[0].message.content')
-
-            # create draft post
-            post_id=$(curl -s -X POST "$WP_URL/wp-json/wp/v2/posts" \
-              -H "Authorization: Basic $basic" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg title "$title" --arg content "$content" '{title:$title,content:$content,status:"draft"}')" | jq -r '.id')
-            echo "Created draft post id=$post_id"
-            # append WP_POST_ID to issue body
-            newbody="$body"$'\n'"WP_POST_ID: $post_id"
-            update_issue_body "$newbody"
-            comment_issue "draft created: $post_id"
-            set_labels drafted approved
-
-          elif [ "$ACTION" = "needs_changes" ]; then
-            if [ -z "$wp_post_id" ]; then
-              echo "No WP_POST_ID in issue body. Add e.g. 'WP_POST_ID: 123'."
-              exit 1
-            fi
-            if [ -z "${OPENAI_API_KEY:-}" ]; then
-              echo "OPENAI_API_KEY not set; cannot revise content"
-              exit 1
-            fi
-            # get latest comment as revision directives
-            last_comment=$(get_issue_comments)
-            instructions=$(echo "$last_comment" | jq -r '.[0].body // ""')
-            if [ -z "$instructions" ]; then
-              echo "No revision instructions found in latest comment."
-              exit 1
-            fi
-            # get current post content (raw)
-            current=$(curl -s "$WP_URL/wp-json/wp/v2/posts/$wp_post_id?context=edit" \
-              -H "Authorization: Basic $basic" \
-              -H "Content-Type: application/json" \
-              | jq -r '.content.raw // ""')
-            if [ -z "$current" ]; then
-              current=$(curl -s "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
-                -H "Authorization: Basic $basic" \
-                -H "Content-Type: application/json" \
-                | jq -r '.content.rendered // ""')
-            fi
-            prompt=$(cat <<'PROMPT'
-            You are editing an existing WordPress post in raw HTML. Rewrite the CURRENT HTML content according to the INSTRUCTIONS, but you must preserve and keep the order of these placeholders exactly as-is (including comments): <!-- MANUAL_1_START --><!-- MANUAL_1_END -->, <!-- MANUAL_2_START --><!-- MANUAL_2_END -->, <!-- MANUAL_3_START --><!-- MANUAL_3_END -->. Do not delete or duplicate them. Output only revised HTML content.
-            PROMPT
-            )
-            revised=$(curl -s https://api.openai.com/v1/chat/completions \
-              -H "Authorization: Bearer $OPENAI_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n \
-                --arg model "gpt-4o-mini" \
-                --arg sys "$prompt" \
-                --arg usr "INSTRUCTIONS:\n$instructions\n\nCURRENT:\n$current" \
-                '{model:$model,messages:[{role:"system",content:$sys},{role:"user",content:$usr}],temperature:0.2}' \
-              )" | jq -r '.choices[0].message.content')
-
-            curl -s -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
-              -H "Authorization: Basic $basic" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg content "$revised" '{content:$content}')" > /dev/null
-            comment_issue "revised"
-            set_labels revised needs_changes
-
-          elif [ "$ACTION" = "publish_ok" ]; then
-            if [ -z "$wp_post_id" ]; then
-              echo "No WP_POST_ID in issue body."
-              exit 1
-            fi
-            python - <<'PY' > schedule.json
-            from datetime import datetime, time, timedelta, timezone
-            import json
-            JST = timezone(timedelta(hours=9))
-            now = datetime.now(JST)
-            target_time = time(19, 0)
-            def next_occurrence(now):
-                for offset in range(8):
-                    d = now.date() + timedelta(days=offset)
-                    dt = datetime.combine(d, target_time, JST)
-                    if dt <= now:
-                        continue
-                    # Tuesday=1 Friday=4 (weekday: Monday=0)
-                    if dt.weekday() in (1, 4):
-                        return dt
-                return now + timedelta(days=1)
-            dt = next_occurrence(now)
-            print(json.dumps({"date_jst": dt.isoformat(timespec="seconds"), "date_gmt": dt.astimezone(timezone.utc).isoformat(timespec="seconds")}))
-            PY
-            date_jst=$(jq -r '.date_jst' schedule.json)
-            date_gmt=$(jq -r '.date_gmt' schedule.json)
-            curl -s -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
-              -H "Authorization: Basic $basic" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg status "future" --arg date "$date_jst" --arg date_gmt "$date_gmt" '{status:$status,date:$date,date_gmt:$date_gmt}')" > /dev/null
-            comment_issue "scheduled for ${date_jst} JST"
-            set_labels scheduled publish_ok
-
-          else
-            echo "Unknown action: $ACTION"
-            exit 1
-          fi
