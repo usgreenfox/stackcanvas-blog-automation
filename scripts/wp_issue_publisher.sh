@@ -118,16 +118,37 @@ PROMPT
 
   echo "Creating WordPress draft..."
 
-  wp_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$WP_URL/wp-json/wp/v2/posts" \
-    --user "$WP_USER:$WP_APP_PASSWORD" \
-    -H "Content-Type: application/json" \
-    -d "$(jq -n \
+  # wp_response=$(curl -s -w "\n%{http_code}" \
+  #   -X POST "$WP_URL/wp-json/wp/v2/posts" \
+  #   --user "$WP_USER:$WP_APP_PASSWORD" \
+  #   -H "Content-Type: application/json" \
+  #   -d "$(jq -n \
+  #     --arg title "$title" \
+  #     --arg content "$content" \
+  #     --arg status "draft" \
+  #     '{title:$title,content:$content,status:$status}')")
+
+# まず到達性チェック（wp-jsonがリダイレクトしてないか確認）
+curl -sv -I "$WP_URL/wp-json/" 2>&1 | sed -e 's/^/[wp-json] /'
+
+# Draft作成（ヘッダも出す）
+wp_response=$(curl -sv -i -w "\n%{http_code}" \
+  -X POST "$WP_URL/wp-json/wp/v2/posts" \
+  --user "$WP_USER:$WP_APP_PASSWORD" \
+  -H "User-Agent: stackcanvas-bot/1.0" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n \
       --arg title "$title" \
       --arg content "$content" \
       --arg status "draft" \
-      '{title:$title,content:$content,status:$status}')")
+      '{title:$title,content:$content,status:$status}')" 2>&1)
 
+# curlの生ログを出す（403の発行元特定用）
+echo "$wp_response" | sed -e 's/^/[wp-post] /'
+
+# 末尾のステータスコードだけ抽出（すでに -w で付いてる想定）
+wp_status=$(echo "$wp_response" | tail -n1)
   wp_body=$(echo "$wp_response" | sed '$d')
   wp_status=$(echo "$wp_response" | tail -n1)
 
