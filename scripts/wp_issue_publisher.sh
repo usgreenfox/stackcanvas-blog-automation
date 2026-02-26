@@ -120,7 +120,7 @@ PROMPT
 
   wp_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$WP_URL/wp-json/wp/v2/posts" \
-    -H "Authorization: Basic $basic" \
+    --user "$WP_USER:$WP_APP_PASSWORD" \
     -H "Content-Type: application/json" \
     -d "$(jq -n \
       --arg title "$title" \
@@ -182,7 +182,7 @@ PY
   date_gmt=$(jq -r '.date_gmt' schedule.json)
 
   curl -s -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
-    -H "Authorization: Basic $basic" \
+    --user "$WP_USER:$WP_APP_PASSWORD" \
     -H "Content-Type: application/json" \
     -d "$(jq -n \
       --arg status "future" \
