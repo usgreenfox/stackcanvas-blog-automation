@@ -166,6 +166,89 @@ fi
   comment_issue "Draft created: WP_POST_ID=$post_id"
   set_labels drafted approved
 
+elif [ "$ACTION" = "needs_changes" ]; then
+
+  if [ -z "$wp_post_id" ]; then
+    echo "WP_POST_ID not found. Cannot update."
+    exit 1
+  fi
+
+  if [ -z "${OPENAI_API_KEY:-}" ]; then
+    echo "OPENAI_API_KEY not set"
+    exit 1
+  fi
+
+  echo "Regenerating article via OpenAI (update mode)..."
+
+  prompt=$(
+cat <<'PROMPT'
+You are assisting with an issue-driven workflow for an IT technical blog.
+Regenerate the article based on the TITLE and BODY below.
+
+Output must be raw HTML only (no markdown).
+
+The content must include exactly these placeholders and must NOT remove or move them:
+
+<!-- MANUAL_1_START --><!-- MANUAL_1_END -->
+<!-- MANUAL_2_START --><!-- MANUAL_2_END -->
+<!-- MANUAL_3_START --><!-- MANUAL_3_END -->
+
+TITLE:
+PROMPT
+)
+
+  echo "$prompt" > prompt.txt
+  echo "$title" >> prompt.txt
+  echo "BODY:" >> prompt.txt
+  echo "$body" >> prompt.txt
+
+  openai_response=$(curl -s -w "\n%{http_code}" https://api.openai.com/v1/responses \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
+      --arg model "gpt-4.1-mini" \
+      --arg input "$(cat prompt.txt)" \
+      '{model:$model,input:$input,temperature:0.3}')")
+
+  openai_body=$(echo "$openai_response" | sed '$d')
+  openai_status=$(echo "$openai_response" | tail -n1)
+
+  if [ "$openai_status" != "200" ]; then
+    echo "OpenAI API error:"
+    echo "$openai_body"
+    exit 1
+  fi
+
+  content=$(echo "$openai_body" | jq -r '.output[0].content[0].text')
+
+  echo "Updating existing WordPress draft (ID=$wp_post_id)..."
+
+  wp_body_file="$(mktemp)"
+  wp_status=$(
+    curl -sS -o "$wp_body_file" -w "%{http_code}" \
+      -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
+      --user "$WP_USER:$WP_APP_PASSWORD" \
+      -H "User-Agent: stackcanvas-bot/1.0" \
+      -H "Accept: application/json" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+        --arg title "$title" \
+        --arg content "$content" \
+        '{title:$title,content:$content}')"
+  )
+
+  wp_body="$(cat "$wp_body_file")"
+  rm -f "$wp_body_file"
+
+  if [ "$wp_status" != "200" ]; then
+    echo "WordPress update error: status=$wp_status"
+    echo "$wp_body"
+    exit 1
+  fi
+
+  comment_issue "Draft updated: WP_POST_ID=$wp_post_id"
+  set_labels drafted needs_changes
+  
 elif [ "$ACTION" = "publish_ok" ]; then
 
   if [ -z "$wp_post_id" ]; then
