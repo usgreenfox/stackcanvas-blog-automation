@@ -129,35 +129,35 @@ PROMPT
   #     '{title:$title,content:$content,status:$status}')")
 
 # まず到達性チェック（wp-jsonがリダイレクトしてないか確認）
-curl -sv -I "$WP_URL/wp-json/" 2>&1 | sed -e 's/^/[wp-json] /'
+if [ "${DEBUG_WP:-}" = "1" ]; then
+  curl -sv -I "$WP_URL/wp-json/" 1>/dev/null 2>&1 | sed -e 's/^/[wp-json] /' >&2 || true
+fi
 
-# Draft作成（ヘッダも出す）
-wp_response=$(curl -sv -i -w "\n%{http_code}" \
-  -X POST "$WP_URL/wp-json/wp/v2/posts" \
-  --user "$WP_USER:$WP_APP_PASSWORD" \
-  -H "User-Agent: stackcanvas-bot/1.0" \
-  -H "Accept: application/json" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n \
+# bodyをファイルに退避して、curlの出力を混ぜない
+wp_body_file="$(mktemp)"
+wp_status=$(
+  curl -sS -o "$wp_body_file" -w "%{http_code}" \
+    -X POST "$WP_URL/wp-json/wp/v2/posts" \
+    --user "$WP_USER:$WP_APP_PASSWORD" \
+    -H "User-Agent: stackcanvas-bot/1.0" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n \
       --arg title "$title" \
       --arg content "$content" \
       --arg status "draft" \
-      '{title:$title,content:$content,status:$status}')" 2>&1)
+      '{title:$title,content:$content,status:$status}')"
+)
 
-# curlの生ログを出す（403の発行元特定用）
-echo "$wp_response" | sed -e 's/^/[wp-post] /'
+wp_body="$(cat "$wp_body_file")"
+rm -f "$wp_body_file"
 
-# 末尾のステータスコードだけ抽出（すでに -w で付いてる想定）
-wp_status=$(echo "$wp_response" | tail -n1)
-  wp_body=$(echo "$wp_response" | sed '$d')
-  wp_status=$(echo "$wp_response" | tail -n1)
-
-  if [ "$wp_status" != "201" ]; then
-    echo "WordPress API error:"
-    echo "$wp_body"
-    exit 1
-  fi
-
+# 失敗時だけレスポンスを見やすく出す
+if [ "$wp_status" != "201" ]; then
+  echo "WordPress API error: status=$wp_status"
+  echo "$wp_body"
+  exit 1
+fi
   post_id=$(echo "$wp_body" | jq -r '.id')
 
   newbody="$body"$'\n'"WP_POST_ID: $post_id"
