@@ -226,7 +226,7 @@ PROMPT
   wp_body_file="$(mktemp)"
   wp_status=$(
     curl -sS -o "$wp_body_file" -w "%{http_code}" \
-      -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
+      -X POST "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
       --user "$WP_USER:$WP_APP_PASSWORD" \
       -H "User-Agent: stackcanvas-bot/1.0" \
       -H "Accept: application/json" \
@@ -285,15 +285,17 @@ PY
   date_jst=$(jq -r '.date_jst' schedule.json)
   date_gmt=$(jq -r '.date_gmt' schedule.json)
 
-  curl -s -X PUT "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
+  curl -s -X POST "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
     --user "$WP_USER:$WP_APP_PASSWORD" \
+    -H "User-Agent: stackcanvas-bot/1.0" \
+    -H "Accept: application/json" \
     -H "Content-Type: application/json" \
     -d "$(jq -n \
       --arg status "future" \
       --arg date "$date_jst" \
       --arg date_gmt "$date_gmt" \
       '{status:$status,date:$date,date_gmt:$date_gmt}')" > /dev/null
-
+      
   comment_issue "Scheduled for ${date_jst} JST"
   set_labels scheduled publish_ok
 
