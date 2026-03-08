@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# WP_URL の末尾スラッシュを除去して //wp-json 事故を防ぐ
+WP_URL="${WP_URL%/}"
+
 basic="$(printf '%s:%s' "$WP_USER" "$WP_APP_PASSWORD" | base64)"
 
 echo "Fetching issue..."
@@ -118,16 +121,6 @@ PROMPT
 
   echo "Creating WordPress draft..."
 
-  # wp_response=$(curl -s -w "\n%{http_code}" \
-  #   -X POST "$WP_URL/wp-json/wp/v2/posts" \
-  #   --user "$WP_USER:$WP_APP_PASSWORD" \
-  #   -H "Content-Type: application/json" \
-  #   -d "$(jq -n \
-  #     --arg title "$title" \
-  #     --arg content "$content" \
-  #     --arg status "draft" \
-  #     '{title:$title,content:$content,status:$status}')")
-
 # まず到達性チェック（wp-jsonがリダイレクトしてないか確認）
 if [ "${DEBUG_WP:-}" = "1" ]; then
   curl -sv -I "$WP_URL/wp-json/" 1>/dev/null 2>&1 | sed -e 's/^/[wp-json] /' >&2 || true
@@ -224,9 +217,12 @@ PROMPT
   echo "Updating existing WordPress draft (ID=$wp_post_id)..."
 
   wp_body_file="$(mktemp)"
+  wp_header_file="$(mktemp)"
+  endpoint="$WP_URL/wp-json/wp/v2/posts/$wp_post_id"
+
   wp_status=$(
-    curl -sS -o "$wp_body_file" -w "%{http_code}" \
-      -X POST "$WP_URL/wp-json/wp/v2/posts/$wp_post_id" \
+    curl -sS -o "$wp_body_file" -D "$wp_header_file" -w "%{http_code}" \
+      -X POST "$endpoint" \
       --user "$WP_USER:$WP_APP_PASSWORD" \
       -H "User-Agent: stackcanvas-bot/1.0" \
       -H "Accept: application/json" \
@@ -238,13 +234,20 @@ PROMPT
   )
 
   wp_body="$(cat "$wp_body_file")"
-  rm -f "$wp_body_file"
 
   if [ "$wp_status" != "200" ]; then
     echo "WordPress update error: status=$wp_status"
     echo "$wp_body"
+    echo "[debug] endpoint=$endpoint" >&2
+    echo "[debug] --- response headers ---" >&2
+    sed -n '1,40p' "$wp_header_file" >&2
+    echo "[debug] --- response body head ---" >&2
+    sed -n '1,10p' "$wp_body_file" >&2
+    rm -f "$wp_body_file" "$wp_header_file"
     exit 1
   fi
+
+  rm -f "$wp_body_file" "$wp_header_file"
 
   comment_issue "Draft updated: WP_POST_ID=$wp_post_id"
   set_labels drafted needs_changes
